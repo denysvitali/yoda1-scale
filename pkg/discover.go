@@ -6,28 +6,27 @@ import (
 	"github.com/muka/go-bluetooth/api"
 	"github.com/muka/go-bluetooth/bluez/profile/adapter"
 	"github.com/muka/go-bluetooth/bluez/profile/device"
-	"github.com/sirupsen/logrus"
-	"os"
 	"sync"
+	"time"
 )
 
-func Discover() (yodaDevices []YodaDevice, err error) {
+func Discover(timeout time.Duration) (yodaDevices []YodaDevice, warnings []error, err error) {
 	a, err := api.GetDefaultAdapter()
 	if err != nil {
-		return yodaDevices, fmt.Errorf("unable to get default bluetooth a: %v", err)
+		return yodaDevices, warnings, fmt.Errorf("unable to get default bluetooth a: %v", err)
 	}
 
 	err = a.StartDiscovery()
 	if err != nil {
-		return yodaDevices, fmt.Errorf("unable to start discovery: %v", err)
+		return yodaDevices, warnings, fmt.Errorf("unable to start discovery: %v", err)
 	}
+
+	_ = a.FlushDevices()
 
 	c, cancel, err := a.OnDeviceDiscovered()
 	if err != nil {
-		return yodaDevices, fmt.Errorf("unable to listen for device discovery: %v", err)
+		return yodaDevices, warnings, fmt.Errorf("unable to listen for device discovery: %v", err)
 	}
-
-	var warnings []error
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -44,78 +43,38 @@ func Discover() (yodaDevices []YodaDevice, err error) {
 
 			yodaDevice, err := parseDevice(dev)
 			if err != nil {
-				fmt.Printf("unable to parse device: %v", err)
+				warnings = append(warnings, fmt.Errorf("unable to parse device: %v", err))
 			}
 
-			if yodaDevice == nil {
+			if !yodaDevice.IsValid() {
 				continue
 			}
 
-			fmt.Printf("yodaDevice: %v\n", yodaDevice)
-
-			c, err := dev.WatchProperties()
-			if err != nil {
-				fmt.Printf("unable to get properties watch channel: %v\n", err)
-			}
-
-			for v := range c {
-				logrus.Debugf("changed=%v\n", v)
-				if v.Name != "ManufacturerData" {
-					// We are only interested in Manufacturer Data changes
-					continue
-				}
-
-				properties, err := dev.GetProperties()
-				if err != nil {
-					logrus.Errorf("unable to get device properties: %v", err)
-					continue
-				}
-
-				dbusVariant, err := getVariantFromMfData(properties.ManufacturerData)
-				if err != nil {
-					logrus.Errorf("unable to get variant: %v", err)
-					continue
-				}
-
-				scaleData, err := getScaleData(dbusVariant)
-				if err != nil {
-					logrus.Errorf("unable to get scale data: %v", err)
-					continue
-				}
-
-				logrus.Printf("scaleData=%v", scaleData)
-			}
+			yodaDevices = append(yodaDevices, yodaDevice)
 		}
 		wg.Done()
 	}()
-	osSigChan := make(chan os.Signal, 1)
 
-	for s := range osSigChan {
-		if s == os.Interrupt {
-			cancel()
-			err = a.StopDiscovery()
-			if err != nil {
-				return yodaDevices, fmt.Errorf("unable to stop discovery")
-			}
-			return yodaDevices, nil
-		}
-	}
-	return nil, nil
+	time.Sleep(timeout)
+	cancel()
+	wg.Wait()
+	_ = a.StopDiscovery()
+	return yodaDevices, warnings, nil
 }
 
-func parseDevice(d *device.Device1) (device *YodaDevice, err error) {
+func parseDevice(d *device.Device1) (device YodaDevice, err error) {
 	name, err := d.GetName()
 	if err != nil {
 		return device, fmt.Errorf("unable to get device name: %v", err)
 	}
 	if name != DeviceBtName {
 		// Not our device
-		return nil, nil
+		return YodaDevice{isYoda: false}, nil
 	}
 	// Found our Yoda1 !
 	dbusVariant, err := getVariantFromMfData(d.Properties.ManufacturerData)
 	if err != nil {
-		return nil, err
+		return device, err
 	}
 
 	scaleData, err := getScaleData(dbusVariant)
@@ -123,10 +82,12 @@ func parseDevice(d *device.Device1) (device *YodaDevice, err error) {
 		return device, err
 	}
 
-	return &YodaDevice{
+	return YodaDevice{
 		MacAddr: d.Properties.Address,
 		Rssi:    d.Properties.RSSI,
 		Data:    scaleData,
+		dev:     d,
+		isYoda: true,
 	}, nil
 }
 
