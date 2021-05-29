@@ -20,7 +20,7 @@ func main(){
 	log := logrus.New()
 	log.Infof("Scanning for devices... please step on your scale")
 
-	d, warns, err := yoda1.Discover(8 * time.Second)
+	d, warns, err := yoda1.Discover(15 * time.Second)
 	if err != nil {
 		log.Fatalf("unable to discover devices: %v", err)
 	}

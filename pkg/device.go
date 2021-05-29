@@ -21,8 +21,8 @@ func (y YodaDevice) IsValid() bool {
 	return y.isYoda
 }
 
-func (y YodaDevice) WatchEvents() (<- chan *ScaleData, error) {
-	outChannel := make(chan *ScaleData, 1)
+func (y YodaDevice) WatchEvents() (<- chan ScaleData, error) {
+	outChannel := make(chan ScaleData, 1)
 	inChannel, err := y.dev.WatchProperties()
 	if err != nil {
 		return outChannel, fmt.Errorf("unable to get properties watch channel: %v\n", err)
@@ -53,7 +53,7 @@ func (y YodaDevice) WatchEvents() (<- chan *ScaleData, error) {
 				continue
 			}
 
-			outChannel <- &scaleData
+			outChannel <- scaleData
 		}
 	}()
 	return outChannel, nil
