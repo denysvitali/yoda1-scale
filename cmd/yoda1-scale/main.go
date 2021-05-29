@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/alexflint/go-arg"
 	yoda1 "github.com/denysvitali/yoda1-scale/pkg"
 	"github.com/sirupsen/logrus"
 	"os"
@@ -14,8 +15,9 @@ var args struct {
 }
 
 func main(){
-	log := logrus.New()
+	arg.MustParse(&args)
 
+	log := logrus.New()
 	log.Infof("Scanning for devices... please step on your scale")
 
 	d, warns, err := yoda1.Discover(8 * time.Second)
